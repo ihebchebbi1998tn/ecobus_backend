@@ -3,8 +3,44 @@ import { withTransaction, query } from '../config/db.js';
 import { env } from '../config/env.js';
 import { signToken } from '../middleware/auth.js';
 import { ApiError } from '../utils/ApiError.js';
+import {
+  issueRefreshToken,
+  rotateRefreshToken,
+  revokeRefreshToken,
+} from './refreshTokenService.js';
 
-export const registerOrgAndAdmin = async (input) => {
+const buildAuthPayload = async (user, organization, ctx = {}) => {
+  const accessToken = signToken({
+    sub: user.id,
+    org: user.organization_id || organization?.id,
+    email: user.email,
+  });
+  const { refreshToken, refreshExpiresAt } = await issueRefreshToken(user.id, ctx);
+  return {
+    accessToken,
+    refreshToken,
+    refreshExpiresAt,
+    accessExpiresIn: env.jwtExpiresIn,
+    user,
+    ...(organization ? { organization } : {}),
+  };
+};
+
+const ensureRole = async (client, name) => {
+  const r = await client.query(
+    `INSERT INTO roles (name) VALUES ($1)
+     ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [name],
+  );
+  return r.rows[0].id;
+};
+
+/**
+ * Register a new organization + initial admin user.
+ * Used during first-time school onboarding.
+ */
+export const registerOrgAndAdmin = async (input, ctx) => {
   const { organizationName, firstName, lastName, email, phone, password } = input;
 
   const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
@@ -12,7 +48,7 @@ export const registerOrgAndAdmin = async (input) => {
 
   const hash = await bcrypt.hash(password, env.bcryptRounds);
 
-  return withTransaction(async (client) => {
+  const created = await withTransaction(async (client) => {
     const orgRes = await client.query(
       `INSERT INTO organizations (name, contact_email, phone, subscription_plan, subscription_status)
        VALUES ($1, $2, $3, 'starter', 'trial') RETURNING id, name`,
@@ -22,28 +58,62 @@ export const registerOrgAndAdmin = async (input) => {
 
     const userRes = await client.query(
       `INSERT INTO users (organization_id, first_name, last_name, email, phone, password_hash)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, email, first_name, last_name`,
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, organization_id, email, first_name, last_name`,
       [org.id, firstName, lastName, email, phone || null, hash],
     );
     const user = userRes.rows[0];
 
-    const adminRoleRes = await client.query(
-      `INSERT INTO roles (name) VALUES ('admin')
-       ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-       RETURNING id`,
-    );
+    const adminRoleId = await ensureRole(client, 'admin');
     await client.query(
-      `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2)
-       ON CONFLICT DO NOTHING`,
-      [user.id, adminRoleRes.rows[0].id],
+      `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [user.id, adminRoleId],
     );
 
-    const token = signToken({ sub: user.id, org: org.id, email: user.email });
-    return { token, user, organization: org };
+    return { user, organization: org };
   });
+
+  return buildAuthPayload(created.user, created.organization, ctx);
 };
 
-export const login = async ({ email, password }) => {
+/**
+ * Self-registration for a parent. Requires an organizationId so the parent
+ * is attached to the school they want to follow.
+ */
+export const registerParent = async (input, ctx) => {
+  const { organizationId, firstName, lastName, email, phone, password } = input;
+
+  const orgRow = await query(
+    `SELECT id, name FROM organizations WHERE id = $1 AND deleted_at IS NULL`,
+    [organizationId],
+  );
+  if (!orgRow.rows[0]) throw ApiError.badRequest('Organization not found');
+
+  const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
+  if (existing.rowCount > 0) throw ApiError.conflict('Email already registered');
+
+  const hash = await bcrypt.hash(password, env.bcryptRounds);
+
+  const created = await withTransaction(async (client) => {
+    const userRes = await client.query(
+      `INSERT INTO users (organization_id, first_name, last_name, email, phone, password_hash)
+       VALUES ($1,$2,$3,$4,$5,$6)
+       RETURNING id, organization_id, email, first_name, last_name`,
+      [organizationId, firstName, lastName, email, phone || null, hash],
+    );
+    const user = userRes.rows[0];
+    const parentRoleId = await ensureRole(client, 'parent');
+    await client.query(
+      `INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [user.id, parentRoleId],
+    );
+    return { user };
+  });
+
+  return buildAuthPayload(created.user, orgRow.rows[0], ctx);
+};
+
+export const login = async ({ email, password }, ctx) => {
   const { rows } = await query(
     `SELECT id, organization_id, email, first_name, last_name, password_hash, is_active
      FROM users WHERE email = $1 AND deleted_at IS NULL`,
@@ -55,13 +125,37 @@ export const login = async ({ email, password }) => {
   const ok = await bcrypt.compare(password, user.password_hash || '');
   if (!ok) throw ApiError.unauthorized('Invalid credentials');
 
-  const token = signToken({
-    sub: user.id,
-    org: user.organization_id,
-    email: user.email,
-  });
   delete user.password_hash;
-  return { token, user };
+  return buildAuthPayload(user, null, ctx);
+};
+
+/**
+ * Exchange a refresh token for a new access token (with rotation).
+ */
+export const refresh = async (rawRefreshToken, ctx) => {
+  const rotated = await rotateRefreshToken(rawRefreshToken, ctx);
+  const { rows } = await query(
+    `SELECT id, organization_id, email FROM users WHERE id = $1 AND deleted_at IS NULL`,
+    [rotated.userId],
+  );
+  if (!rows[0]) throw ApiError.unauthorized('User no longer exists');
+
+  const accessToken = signToken({
+    sub: rows[0].id,
+    org: rows[0].organization_id,
+    email: rows[0].email,
+  });
+  return {
+    accessToken,
+    refreshToken: rotated.refreshToken,
+    refreshExpiresAt: rotated.refreshExpiresAt,
+    accessExpiresIn: env.jwtExpiresIn,
+  };
+};
+
+export const logout = async (rawRefreshToken) => {
+  await revokeRefreshToken(rawRefreshToken);
+  return { success: true };
 };
 
 export const me = async (userId) => {

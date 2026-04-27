@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
@@ -7,6 +8,16 @@ import * as svc from '../services/routeService.js';
 
 const router = Router();
 router.use(requireAuth);
+
+const updateRouteSchema = z.object({
+  name: z.string().min(1).max(100).optional(),
+  description: z.string().max(2000).optional(),
+  isActive: z.boolean().optional(),
+}).refine((v) => Object.keys(v).length > 0, 'At least one field required');
+
+const replaceStopsSchema = z.object({
+  stops: z.array(stopSchema).min(1),
+});
 
 /**
  * @openapi
@@ -93,3 +104,29 @@ router.post(
 );
 
 export default router;
+
+// Get one route
+router.get('/:id', asyncHandler(async (req, res) =>
+  res.json(await svc.getById(req.user.organizationId, req.params.id))));
+
+// Update a route
+router.patch(
+  '/:id',
+  validate(updateRouteSchema),
+  asyncHandler(async (req, res) =>
+    res.json(await svc.update(req.user.organizationId, req.params.id, req.body))),
+);
+
+// Delete a route
+router.delete('/:id', asyncHandler(async (req, res) =>
+  res.json(await svc.remove(req.user.organizationId, req.params.id))));
+
+// Replace all stops on a route in one call
+router.put(
+  '/:id/stops',
+  validate(replaceStopsSchema),
+  asyncHandler(async (req, res) =>
+    res.json(await svc.replaceStops(req.params.id, req.body.stops))),
+);
+
+export { router };

@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../config/db.js';
+import { ApiError } from '../utils/ApiError.js';
 
 export const list = (orgId) =>
   query(
@@ -47,3 +48,40 @@ export const replaceStops = (routeId, stopList) =>
     }
     return { ok: true };
   });
+
+export const getById = async (orgId, routeId) => {
+  const { rows } = await query(
+    `SELECT id, name, description, is_active, created_at
+     FROM routes WHERE id = $1 AND organization_id = $2`,
+    [routeId, orgId],
+  );
+  if (!rows[0]) throw ApiError.notFound('Route not found');
+  return rows[0];
+};
+
+export const update = async (orgId, routeId, patch) => {
+  await getById(orgId, routeId);
+  const map = { name: 'name', description: 'description', isActive: 'is_active' };
+  const fields = []; const params = [];
+  for (const [k, col] of Object.entries(map)) {
+    if (patch[k] !== undefined) {
+      params.push(patch[k]);
+      fields.push(`${col} = $${params.length}`);
+    }
+  }
+  if (!fields.length) return getById(orgId, routeId);
+  params.push(routeId, orgId);
+  const { rows } = await query(
+    `UPDATE routes SET ${fields.join(', ')}, updated_at = NOW()
+     WHERE id = $${params.length - 1} AND organization_id = $${params.length}
+     RETURNING id, name, description, is_active, created_at`,
+    params,
+  );
+  return rows[0];
+};
+
+export const remove = async (orgId, routeId) => {
+  await getById(orgId, routeId);
+  await query('DELETE FROM routes WHERE id = $1 AND organization_id = $2', [routeId, orgId]);
+  return { success: true };
+};

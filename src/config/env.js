@@ -63,8 +63,10 @@ export const env = {
   pgSsl: resolveSsl(databaseUrl),
 
   jwtSecret: required('JWT_SECRET', 'dev-only-insecure-secret-change-me'),
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '15m',
+  refreshTokenTtlDays: Number(process.env.REFRESH_TOKEN_TTL_DAYS || 30),
   bcryptRounds: Number(process.env.BCRYPT_ROUNDS || 12),
+  gpsMinIntervalMs: Number(process.env.GPS_MIN_INTERVAL_MS || 3000),
 
   corsOrigin: (process.env.CORS_ORIGIN || '*')
     .split(',')

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { query } from '../config/db.js';
 import { logger } from '../utils/logger.js';
+import { getIO } from '../sockets/io.js';
 
 const router = Router();
 
@@ -67,6 +68,8 @@ router.get('/ready', asyncHandler(async (_req, res) => {
     checks: {
       database: { status: 'unknown', latencyMs: null, error: null },
       schema: { status: 'unknown', missing: [], present: 0, required: REQUIRED_TABLES.length },
+      websocket: { status: 'unknown', namespaces: [], connections: 0 },
+      redis: { status: 'disabled', note: 'Redis is not provisioned for this deployment' },
     },
     timestamp: new Date().toISOString(),
   };
@@ -107,11 +110,45 @@ router.get('/ready', asyncHandler(async (_req, res) => {
     report.checks.schema.status = 'skipped';
   }
 
-  const ok = report.checks.database.status === 'ok' && report.checks.schema.status === 'ok';
+  // 3. WebSocket (Socket.io) — verify the server is initialised and reachable
+  try {
+    const io = getIO();
+    if (!io) {
+      report.checks.websocket.status = 'down';
+      report.checks.websocket.error = 'Socket.io server not initialised';
+    } else {
+      const ws = io.of('/ws');
+      const defaultCount = io.engine?.clientsCount ?? 0;
+      const wsCount = ws.sockets?.size ?? 0;
+      report.checks.websocket.status = 'ok';
+      report.checks.websocket.namespaces = ['/', '/ws'];
+      report.checks.websocket.connections = defaultCount;
+      report.checks.websocket.wsNamespaceConnections = wsCount;
+    }
+  } catch (err) {
+    report.checks.websocket.status = 'error';
+    report.checks.websocket.error = err.message;
+  }
+
+  const ok =
+    report.checks.database.status === 'ok' &&
+    report.checks.schema.status === 'ok' &&
+    report.checks.websocket.status === 'ok';
   report.status = ok ? 'ok' : 'degraded';
   report.totalLatencyMs = Date.now() - startedAt;
 
-  res.status(ok ? 200 : 503).json(report);
+  // Envelope middleware wraps 2xx bodies automatically. For 503 we shape the
+  // envelope explicitly so the failing report still surfaces in `data`.
+  if (ok) {
+    res.locals.message = 'All systems operational';
+    return res.status(200).json(report);
+  }
+  return res.status(503).json({
+    success: false,
+    data: report,
+    message: 'One or more dependencies are unhealthy',
+    error: 'degraded',
+  });
 }));
 
 export default router;

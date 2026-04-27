@@ -6,6 +6,7 @@ import { logger } from './utils/logger.js';
 import { pool } from './config/db.js';
 import { runPendingMigrations } from './config/autoMigrate.js';
 import { startGitSync } from './config/gitSync.js';
+import { startCronJobs, stopCronJobs } from './jobs/index.js';
 
 const AUTO_MIGRATE = process.env.AUTO_MIGRATE !== 'false'; // default ON
 
@@ -39,6 +40,7 @@ const start = async () => {
   const app = createApp();
   const server = http.createServer(app);
   initSocket(server);
+  startCronJobs();
 
   // Start optional GitHub auto-sync. When new commits arrive, re-run migrations
   // so DB schema stays in step with the latest pulled code.
@@ -61,6 +63,7 @@ const start = async () => {
   const shutdown = async (signal) => {
     logger.info(`Received ${signal}, shutting down...`);
     sync.stop();
+    stopCronJobs();
     server.close(() => logger.info('HTTP closed'));
     await pool.end().catch(() => {});
     process.exit(0);

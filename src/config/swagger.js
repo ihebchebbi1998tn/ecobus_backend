@@ -13,14 +13,20 @@ const definition = {
     license: { name: 'Proprietary' },
   },
   servers: [
+    ...(process.env.PUBLIC_BASE_URL
+      ? [{ url: `${process.env.PUBLIC_BASE_URL.replace(/\/$/, '')}${env.apiPrefix}`, description: 'Configured (PUBLIC_BASE_URL)' }]
+      : []),
     { url: `http://localhost:${env.port}${env.apiPrefix}`, description: 'Local dev' },
     { url: `https://api.ecobus.tn${env.apiPrefix}`, description: 'Production' },
   ],
   tags: [
     { name: 'Health', description: 'Liveness and readiness probes' },
     { name: 'Logs', description: 'Backend log viewer (token-protected)' },
-    { name: 'Auth', description: 'Registration, login, current user' },
+    { name: 'Auth', description: 'Registration, login, profile, password' },
+    { name: 'Users', description: 'User & role management (admin only)' },
     { name: 'Buses', description: 'Fleet management' },
+    { name: 'Children', description: 'Children profiles and route assignments' },
+    { name: 'Drivers', description: 'Driver listing and route assignments' },
     { name: 'Routes', description: 'Routes and stops' },
     { name: 'Trips', description: 'Trip lifecycle' },
     { name: 'GPS', description: 'Real-time location ingestion' },
@@ -117,6 +123,18 @@ const definition = {
           password: { type: 'string' },
         },
       },
+      RegisterParentInput: {
+        type: 'object',
+        required: ['organizationId', 'firstName', 'lastName', 'email', 'password'],
+        properties: {
+          organizationId: { type: 'string', format: 'uuid' },
+          firstName: { type: 'string', example: 'Leila' },
+          lastName: { type: 'string', example: 'Trabelsi' },
+          email: { type: 'string', format: 'email' },
+          phone: { type: 'string' },
+          password: { type: 'string', minLength: 8 },
+        },
+      },
       User: {
         type: 'object',
         properties: {
@@ -134,6 +152,43 @@ const definition = {
         properties: {
           id: { type: 'string', format: 'uuid' },
           name: { type: 'string' },
+        },
+      },
+      CreateUserInput: {
+        type: 'object',
+        required: ['firstName', 'lastName', 'email', 'password', 'roles'],
+        properties: {
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          email: { type: 'string', format: 'email' },
+          phone: { type: 'string' },
+          password: { type: 'string', minLength: 8 },
+          roles: {
+            type: 'array',
+            minItems: 1,
+            items: { type: 'string', enum: ['super_admin', 'admin', 'school_manager', 'driver', 'parent'] },
+          },
+        },
+      },
+      UpdateUserInput: {
+        type: 'object',
+        properties: {
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          phone: { type: 'string' },
+          isActive: { type: 'boolean' },
+          roles: {
+            type: 'array',
+            items: { type: 'string', enum: ['super_admin', 'admin', 'school_manager', 'driver', 'parent'] },
+          },
+        },
+      },
+      UpdateProfileInput: {
+        type: 'object',
+        properties: {
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          phone: { type: 'string' },
         },
       },
       Bus: {
@@ -154,6 +209,62 @@ const definition = {
           name: { type: 'string' },
           plateNumber: { type: 'string' },
           capacity: { type: 'integer', minimum: 1, maximum: 200 },
+          status: { type: 'string', enum: ['active', 'inactive', 'maintenance'] },
+        },
+      },
+      Child: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          organization_id: { type: 'string', format: 'uuid' },
+          first_name: { type: 'string' },
+          last_name: { type: 'string' },
+          date_of_birth: { type: 'string', format: 'date', nullable: true },
+          parent_id: { type: 'string', format: 'uuid', nullable: true },
+          routes: { type: 'array', items: { type: 'object' } },
+        },
+      },
+      ChildInput: {
+        type: 'object',
+        required: ['firstName', 'lastName'],
+        properties: {
+          firstName: { type: 'string' },
+          lastName: { type: 'string' },
+          dateOfBirth: { type: 'string', example: '2015-04-12' },
+          parentId: { type: 'string', format: 'uuid' },
+        },
+      },
+      ChildRouteInput: {
+        type: 'object',
+        required: ['routeId'],
+        properties: {
+          routeId: { type: 'string', format: 'uuid' },
+          pickupStopId: { type: 'string', format: 'uuid' },
+          dropoffStopId: { type: 'string', format: 'uuid' },
+        },
+      },
+      Assignment: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid' },
+          route_id: { type: 'string', format: 'uuid' },
+          bus_id: { type: 'string', format: 'uuid' },
+          driver_id: { type: 'string', format: 'uuid' },
+          start_date: { type: 'string', format: 'date', nullable: true },
+          end_date: { type: 'string', format: 'date', nullable: true },
+          is_active: { type: 'boolean' },
+        },
+      },
+      AssignmentInput: {
+        type: 'object',
+        required: ['routeId', 'busId', 'driverId'],
+        properties: {
+          routeId: { type: 'string', format: 'uuid' },
+          busId: { type: 'string', format: 'uuid' },
+          driverId: { type: 'string', format: 'uuid' },
+          startDate: { type: 'string', example: '2025-09-01' },
+          endDate: { type: 'string', example: '2026-06-30' },
+          isActive: { type: 'boolean' },
         },
       },
       LiveStatus: {
@@ -232,14 +343,29 @@ const definition = {
         type: 'object',
         required: ['busId', 'latitude', 'longitude'],
         properties: {
-          busId: { type: 'string', format: 'uuid' },
-          tripId: { type: 'string', format: 'uuid' },
-          latitude: { type: 'number' },
-          longitude: { type: 'number' },
-          speed: { type: 'number' },
-          heading: { type: 'number' },
-          accuracy: { type: 'number' },
-          batteryLevel: { type: 'integer', minimum: 0, maximum: 100 },
+          busId: { type: 'string', format: 'uuid', example: '7f1c0e9a-2b3d-4e5f-90ab-1c2d3e4f5a6b' },
+          tripId: { type: 'string', format: 'uuid', example: 'b2c3d4e5-6f70-4182-93a4-b5c6d7e8f901' },
+          latitude: { type: 'number', example: 36.8065 },
+          longitude: { type: 'number', example: 10.1815 },
+          speed: { type: 'number', description: 'm/s', example: 12.4 },
+          heading: { type: 'number', description: 'degrees 0-360', example: 87.5 },
+          accuracy: { type: 'number', description: 'meters', example: 8.2 },
+          batteryLevel: { type: 'integer', minimum: 0, maximum: 100, example: 73 },
+        },
+      },
+      GpsLogEntry: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', format: 'uuid', example: 'a1b2c3d4-5e6f-4708-91a2-b3c4d5e6f708' },
+          trip_id: { type: 'string', format: 'uuid', nullable: true, example: 'b2c3d4e5-6f70-4182-93a4-b5c6d7e8f901' },
+          bus_id: { type: 'string', format: 'uuid', example: '7f1c0e9a-2b3d-4e5f-90ab-1c2d3e4f5a6b' },
+          latitude: { type: 'number', example: 36.8065 },
+          longitude: { type: 'number', example: 10.1815 },
+          speed: { type: 'number', nullable: true, example: 12.4 },
+          heading: { type: 'number', nullable: true, example: 87.5 },
+          accuracy: { type: 'number', nullable: true, example: 8.2 },
+          battery_level: { type: 'integer', nullable: true, example: 73 },
+          recorded_at: { type: 'string', format: 'date-time', example: '2026-04-27T08:15:32.000Z' },
         },
       },
       Checkin: {
@@ -278,9 +404,10 @@ const definition = {
       SosInput: {
         type: 'object',
         properties: {
-          tripId: { type: 'string', format: 'uuid' },
-          latitude: { type: 'number' },
-          longitude: { type: 'number' },
+          tripId: { type: 'string', format: 'uuid', example: 'b2c3d4e5-6f70-4182-93a4-b5c6d7e8f901' },
+          latitude: { type: 'number', example: 36.8065 },
+          longitude: { type: 'number', example: 10.1815 },
+          message: { type: 'string', maxLength: 500, example: 'Engine smoke, pulling over' },
         },
       },
       Notification: {

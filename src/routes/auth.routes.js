@@ -3,17 +3,30 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { validate } from '../middleware/validate.js';
 import { authLimiter } from '../middleware/rateLimit.js';
 import { requireAuth } from '../middleware/auth.js';
-import { registerSchema, loginSchema } from '../validators/schemas.js';
+import {
+  registerSchema,
+  loginSchema,
+  registerParentSchema,
+  refreshSchema,
+  changePasswordSchema,
+  updateProfileSchema,
+} from '../validators/schemas.js';
 import * as svc from '../services/authService.js';
+import * as userSvc from '../services/userService.js';
 
 const router = Router();
+
+const ctx = (req) => ({
+  userAgent: req.headers['user-agent'] || null,
+  ip: req.ip,
+});
 
 /**
  * @openapi
  * /auth/register:
  *   post:
  *     tags: [Auth]
- *     summary: Register a new organization + admin user
+ *     summary: Register a new organization + initial admin user
  *     security: []
  *     requestBody:
  *       required: true
@@ -21,18 +34,38 @@ const router = Router();
  *         application/json:
  *           schema: { $ref: '#/components/schemas/RegisterInput' }
  *     responses:
- *       201:
- *         description: Created
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/AuthResponse' }
+ *       201: { description: Created }
  *       409: { description: Email already registered }
  */
 router.post(
   '/register',
   authLimiter,
   validate(registerSchema),
-  asyncHandler(async (req, res) => res.status(201).json(await svc.registerOrgAndAdmin(req.body))),
+  asyncHandler(async (req, res) =>
+    res.status(201).json(await svc.registerOrgAndAdmin(req.body, ctx(req)))),
+);
+
+/**
+ * @openapi
+ * /auth/register-parent:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Self-register a parent under an existing organization
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { $ref: '#/components/schemas/RegisterParentInput' }
+ *     responses:
+ *       201: { description: Created }
+ */
+router.post(
+  '/register-parent',
+  authLimiter,
+  validate(registerParentSchema),
+  asyncHandler(async (req, res) =>
+    res.status(201).json(await svc.registerParent(req.body, ctx(req)))),
 );
 
 /**
@@ -40,7 +73,7 @@ router.post(
  * /auth/login:
  *   post:
  *     tags: [Auth]
- *     summary: Authenticate and receive a JWT
+ *     summary: Authenticate; returns access + refresh tokens
  *     security: []
  *     requestBody:
  *       required: true
@@ -48,18 +81,42 @@ router.post(
  *         application/json:
  *           schema: { $ref: '#/components/schemas/LoginInput' }
  *     responses:
- *       200:
- *         description: OK
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/AuthResponse' }
+ *       200: { description: OK }
  *       401: { description: Invalid credentials }
  */
 router.post(
   '/login',
   authLimiter,
   validate(loginSchema),
-  asyncHandler(async (req, res) => res.json(await svc.login(req.body))),
+  asyncHandler(async (req, res) => res.json(await svc.login(req.body, ctx(req)))),
+);
+
+/**
+ * @openapi
+ * /auth/refresh:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Exchange a refresh token for a new access token (with rotation)
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [refreshToken]
+ *             properties:
+ *               refreshToken: { type: string }
+ *     responses:
+ *       200: { description: OK }
+ *       401: { description: Invalid/expired refresh token }
+ */
+router.post(
+  '/refresh',
+  authLimiter,
+  validate(refreshSchema),
+  asyncHandler(async (req, res) =>
+    res.json(await svc.refresh(req.body.refreshToken, ctx(req)))),
 );
 
 /**
@@ -69,17 +126,56 @@ router.post(
  *     tags: [Auth]
  *     summary: Current authenticated user
  *     responses:
- *       200:
- *         description: OK
- *         content:
- *           application/json:
- *             schema: { $ref: '#/components/schemas/User' }
- *       401: { description: Unauthorized }
+ *       200: { description: OK }
  */
-router.get(
+router.get('/me', requireAuth, asyncHandler(async (req, res) => res.json(await svc.me(req.user.id))));
+
+/**
+ * @openapi
+ * /auth/me:
+ *   patch:
+ *     tags: [Auth]
+ *     summary: Update the current user's profile
+ *     responses:
+ *       200: { description: OK }
+ */
+router.patch(
   '/me',
   requireAuth,
-  asyncHandler(async (req, res) => res.json(await svc.me(req.user.id))),
+  validate(updateProfileSchema),
+  asyncHandler(async (req, res) => res.json(await userSvc.updateOwnProfile(req.user.id, req.body))),
+);
+
+/**
+ * @openapi
+ * /auth/change-password:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Change the current user's password
+ *     responses:
+ *       200: { description: OK }
+ */
+router.post(
+  '/change-password',
+  requireAuth,
+  validate(changePasswordSchema),
+  asyncHandler(async (req, res) =>
+    res.json(await userSvc.changePassword(req.user.id, req.body.currentPassword, req.body.newPassword))),
+);
+
+/**
+ * @openapi
+ * /auth/logout:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Revoke the supplied refresh token (access tokens remain valid until expiry)
+ *     responses:
+ *       200: { description: OK }
+ */
+router.post(
+  '/logout',
+  requireAuth,
+  asyncHandler(async (req, res) => res.json(await svc.logout(req.body?.refreshToken))),
 );
 
 export default router;
