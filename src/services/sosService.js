@@ -64,10 +64,10 @@ export const trigger = async (user, { tripId, latitude, longitude, message }) =>
 
   const alert = await withTransaction(async (c) => {
     const { rows } = await c.query(
-      `INSERT INTO sos_alerts (user_id, trip_id, latitude, longitude, status)
-       VALUES ($1,$2,$3,$4,'active')
-       RETURNING id, user_id, trip_id, latitude, longitude, status, created_at`,
-      [user.id, ctx.tripId, latitude ?? null, longitude ?? null],
+      `INSERT INTO sos_alerts (organization_id, user_id, trip_id, latitude, longitude, status)
+       VALUES ($1,$2,$3,$4,$5,'active')
+       RETURNING id, organization_id, user_id, trip_id, latitude, longitude, status, created_at`,
+      [user.organizationId, user.id, ctx.tripId, latitude ?? null, longitude ?? null],
     );
     const a = rows[0];
 
@@ -86,6 +86,7 @@ export const trigger = async (user, { tripId, latitude, longitude, message }) =>
     await createNotifications(
       recipients.map((uid) => ({
         userId: uid,
+        organizationId: user.organizationId,
         title: 'SOS Alert',
         message: message || 'An SOS has been triggered. Tap for details.',
         type: 'sos',
@@ -154,7 +155,7 @@ export const resolve = async (orgId, id, actorId) => {
 
 export const listForOrg = (orgId, { status, limit = 100 } = {}) => {
   const params = [orgId];
-  let where = `s.user_id IN (SELECT id FROM users WHERE organization_id = $1)`;
+  let where = `s.organization_id = $1`;
   if (status) {
     params.push(status);
     where += ` AND s.status = $${params.length}`;

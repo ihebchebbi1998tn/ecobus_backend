@@ -33,7 +33,7 @@ const resolveSsl = (databaseUrl) => {
     const url = new URL(databaseUrl);
     const sslmode = url.searchParams.get('sslmode');
     if (sslmode && sslmode !== 'disable') {
-      return { rejectUnauthorized: process.env.PGSSL_STRICT === 'true' };
+      return { rejectUnauthorized: sslmode === 'verify-full' || process.env.PGSSL_STRICT === 'true' };
     }
 
     const host = url.hostname;
@@ -54,12 +54,24 @@ const databaseUrl = required(
   'postgres://postgres:postgres@localhost:5432/ecobus',
 );
 
+const stripPgSslQueryParams = (urlString) => {
+  try {
+    const url = new URL(urlString);
+    url.searchParams.delete('sslmode');
+    url.searchParams.delete('uselibpqcompat');
+    return url.toString();
+  } catch {
+    return urlString;
+  }
+};
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || 'development',
   port: Number(process.env.PORT || 4000),
   apiPrefix: process.env.API_PREFIX || '/api/v1',
 
   databaseUrl,
+  pgConnectionString: stripPgSslQueryParams(databaseUrl),
   pgSsl: resolveSsl(databaseUrl),
 
   jwtSecret: required('JWT_SECRET', 'dev-only-insecure-secret-change-me'),

@@ -26,11 +26,12 @@ export const markAllRead = (userId) =>
     [userId],
   ).then((r) => ({ updated: r.rowCount }));
 
-export const create = ({ userId, title, message, type }) =>
+export const create = ({ userId, title, message, type, organizationId }) =>
   query(
-    `INSERT INTO notifications (user_id, title, message, type)
-     VALUES ($1,$2,$3,$4) RETURNING id, title, message, type, is_read, created_at`,
-    [userId, title, message, type || 'info'],
+    `INSERT INTO notifications (user_id, organization_id, title, message, type)
+     VALUES ($1, COALESCE($2, (SELECT organization_id FROM users WHERE id = $1)), $3, $4, $5)
+     RETURNING id, user_id, organization_id, title, message, type, is_read, created_at`,
+    [userId, organizationId || null, title, message, type || 'info'],
   ).then((r) => r.rows[0]);
 
 /**
@@ -45,14 +46,14 @@ export const createMany = async (items) => {
   const values = [];
   const params = [];
   items.forEach((it, i) => {
-    const o = i * 4;
-    values.push(`($${o + 1},$${o + 2},$${o + 3},$${o + 4})`);
-    params.push(it.userId, it.title, it.message, it.type || 'info');
+    const o = i * 5;
+    values.push(`($${o + 1},COALESCE($${o + 2}, (SELECT organization_id FROM users WHERE id = $${o + 1})),$${o + 3},$${o + 4},$${o + 5})`);
+    params.push(it.userId, it.organizationId || null, it.title, it.message, it.type || 'info');
   });
   const { rows } = await query(
-    `INSERT INTO notifications (user_id, title, message, type)
+    `INSERT INTO notifications (user_id, organization_id, title, message, type)
      VALUES ${values.join(',')}
-     RETURNING id, user_id, title, message, type, is_read, created_at`,
+     RETURNING id, user_id, organization_id, title, message, type, is_read, created_at`,
     params,
   );
   return rows;

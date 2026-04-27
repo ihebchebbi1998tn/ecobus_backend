@@ -25,12 +25,21 @@ export const createApp = () => {
   // Correlation id must run before anything that logs or may error.
   app.use(requestId);
 
-  app.use(helmet({ contentSecurityPolicy: false })); // allow swagger-ui assets
-  app.use(cors({
-    origin: env.corsOrigin.length === 1 && env.corsOrigin[0] === '*' ? true : env.corsOrigin,
+  app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false })); // allow swagger-ui assets
+  // CORS: allow all origins by default. Reflects the request Origin so that
+  // `credentials: true` keeps working (the wildcard '*' is forbidden by browsers
+  // when credentials are included).
+  const corsOptions = {
+    origin: true, // reflect request origin → effectively allow all
     credentials: true,
-    exposedHeaders: ['X-Request-Id'],
-  }));
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'Content-Disposition'],
+    maxAge: 86400,
+    optionsSuccessStatus: 204,
+  };
+  app.use(cors(corsOptions));
+  app.options('*', cors(corsOptions));
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true }));
   // gzip/deflate JSON > 1KB. Skip the SSE log stream which must stay un-buffered.
