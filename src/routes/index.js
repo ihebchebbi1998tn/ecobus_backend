@@ -19,11 +19,13 @@ import alerts from './alert.routes.js';
 import geofences from './geofence.routes.js';
 import health from './health.routes.js';
 import logs from './logs.routes.js';
+import dev from './dev.routes.js';
 
 const router = Router();
 
 router.use('/health', health);
 router.use('/logs', logs);
+router.use('/dev', dev);
 router.use('/auth', auth);
 router.use('/users', users);
 router.use('/organizations', organizations);

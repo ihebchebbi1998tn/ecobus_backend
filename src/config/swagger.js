@@ -34,6 +34,7 @@ const definition = {
     { name: 'SOS', description: 'Emergency alerts' },
     { name: 'Notifications', description: 'User notifications' },
     { name: 'Analytics', description: 'Product analytics events' },
+    { name: 'Dev', description: 'Developer utilities — seed demo data, status snapshots. Not protected; do not enable on production without restrictions.' },
   ],
   components: {
     securitySchemes: {
@@ -428,6 +429,71 @@ const definition = {
           sessionId: { type: 'string', format: 'uuid' },
           eventType: { type: 'string' },
           metadata: { type: 'object', additionalProperties: true },
+        },
+      },
+      DevSeedResponse: {
+        type: 'object',
+        description: 'Standard envelope wrapping the seed result. The interesting payload lives in `data`.',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string', example: 'OK' },
+          data: {
+            type: 'object',
+            properties: {
+              ok: { type: 'boolean', example: true },
+              durationMs: { type: 'integer', description: 'Total seed runtime in milliseconds.', example: 2451 },
+              counts: {
+                type: 'object',
+                description: 'Row count per table after seeding completed. A string starting with `error:` means the COUNT(*) failed for that table (usually a missing migration).',
+                additionalProperties: { oneOf: [{ type: 'integer' }, { type: 'string' }] },
+                example: {
+                  organizations: 3, users: 39, roles: 5, buses: 12, routes: 9,
+                  route_stops: 36, route_assignments: 9, children: 36,
+                  child_routes: 36, trips: 9, gps_logs: 150,
+                },
+              },
+              demoPassword: { type: 'string', example: 'Admin@1234' },
+              organizations: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    key: { type: 'string', example: 'demo' },
+                    name: { type: 'string', example: 'Demo School' },
+                  },
+                },
+              },
+              logins: {
+                type: 'object',
+                description: 'Quick-reference credentials for each seeded role. All use `demoPassword`.',
+                properties: {
+                  super_admin: { type: 'string', example: 'root@ecobus.demo' },
+                  admin: { type: 'string', example: 'admin@demo.demo' },
+                  manager: { type: 'string', example: 'manager@demo.demo' },
+                  driver: { type: 'string', example: 'driver@ecobus.demo' },
+                  parent: { type: 'string', example: 'parent@ecobus.demo' },
+                },
+              },
+            },
+          },
+        },
+      },
+      DevStatusResponse: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean', example: true },
+          message: { type: 'string', example: 'OK' },
+          data: {
+            type: 'object',
+            properties: {
+              counts: {
+                type: 'object',
+                additionalProperties: { type: 'integer' },
+                example: { organizations: 3, users: 39, buses: 12, routes: 9, trips: 9, children: 36 },
+              },
+              activeTrips: { type: 'integer', example: 3 },
+            },
+          },
         },
       },
     },

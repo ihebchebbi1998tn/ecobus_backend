@@ -552,23 +552,30 @@ const seedSafe = async () => {
   await seed();
 };
 
-seedSafe()
-  .then(() => {
-    logger.info('========================================');
-    logger.info('Rich seed complete. Demo credentials (password = Admin@1234):');
-    logger.info('  super_admin → root@ecobus.demo');
-    for (const o of DEMO_ORGS) {
-      logger.info(`  [${o.name}]`);
-      logger.info(`    admin    → admin@${o.key}.demo`);
-      logger.info(`    manager  → manager@${o.key}.demo`);
-      logger.info(`    drivers  → driver1@${o.key}.demo .. driver3@${o.key}.demo`);
-      logger.info(`    parents  → parent1@${o.key}.demo .. parent8@${o.key}.demo`);
-    }
-    logger.info('  Legacy logins kept: driver@ecobus.demo / parent@ecobus.demo');
-    logger.info('========================================');
-  })
-  .catch((err) => {
-    logger.error('Seed failed', { err: err.message, stack: err.stack });
-    process.exitCode = 1;
-  })
-  .finally(() => pool.end());
+export { seedSafe, seed, DEMO_ORGS, DEMO_PASSWORD };
+
+// Only auto-run when invoked directly via `node migrations/seed.js`,
+// not when imported by the dev seed endpoint.
+const isMain = import.meta.url === `file://${process.argv[1]}`;
+if (isMain) {
+  seedSafe()
+    .then(() => {
+      logger.info('========================================');
+      logger.info('Rich seed complete. Demo credentials (password = Admin@1234):');
+      logger.info('  super_admin → root@ecobus.demo');
+      for (const o of DEMO_ORGS) {
+        logger.info(`  [${o.name}]`);
+        logger.info(`    admin    → admin@${o.key}.demo`);
+        logger.info(`    manager  → manager@${o.key}.demo`);
+        logger.info(`    drivers  → driver1@${o.key}.demo .. driver3@${o.key}.demo`);
+        logger.info(`    parents  → parent1@${o.key}.demo .. parent8@${o.key}.demo`);
+      }
+      logger.info('  Legacy logins kept: driver@ecobus.demo / parent@ecobus.demo');
+      logger.info('========================================');
+    })
+    .catch((err) => {
+      logger.error('Seed failed', { err: err.message, stack: err.stack });
+      process.exitCode = 1;
+    })
+    .finally(() => pool.end());
+}
