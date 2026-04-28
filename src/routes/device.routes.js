@@ -32,6 +32,14 @@ router.post(
     res.status(201).json(await svc.registerToken(req.user.id, req.body))),
 );
 
+// Spec alias: some clients POST directly to /devices instead of /devices/token.
+router.post(
+  '/',
+  validate(deviceTokenSchema),
+  asyncHandler(async (req, res) =>
+    res.status(201).json(await svc.registerToken(req.user.id, req.body))),
+);
+
 /**
  * @openapi
  * /devices:

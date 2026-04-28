@@ -18,13 +18,13 @@ router.use(requireAuth);
 
 const MANAGER = ['admin', 'super_admin', 'school_manager'];
 
+// Stops are optional on assignment — they can be filled in later via PATCH
+// on the child resource, or left null when a route only has one stop.
 const createSchema = z.object({
   childId: z.string().uuid(),
   routeId: z.string().uuid(),
   pickupStopId: z.string().uuid().optional(),
   dropoffStopId: z.string().uuid().optional(),
-}).refine((v) => v.pickupStopId || v.dropoffStopId, {
-  message: 'pickupStopId or dropoffStopId is required',
 });
 
 const idParam = z.object({ id: z.string().uuid() });

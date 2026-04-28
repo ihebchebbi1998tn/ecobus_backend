@@ -58,6 +58,23 @@ router.post(
 
 /**
  * @openapi
+ * /organizations/me:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get the current user's organization
+ *     responses:
+ *       200: { description: OK }
+ */
+router.get(
+  '/me',
+  asyncHandler(async (req, res) => {
+    if (!req.user.organizationId) throw ApiError.notFound('User has no organization');
+    res.json(await svc.getById(req.user.organizationId));
+  }),
+);
+
+/**
+ * @openapi
  * /organizations/{id}:
  *   get:
  *     tags: [Organizations]

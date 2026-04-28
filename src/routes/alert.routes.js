@@ -11,13 +11,28 @@ router.use(requireAuth);
 
 const MANAGER = ['admin', 'school_manager', 'super_admin'];
 
-const alertSchema = z.object({
-  type: z.string().min(1).max(50),
-  severity: z.enum(['info', 'warning', 'critical']).optional(),
-  busId: z.string().uuid().optional(),
-  tripId: z.string().uuid().optional(),
-  message: z.string().max(2000).optional(),
-});
+// Canonical severities are info|warning|critical, but mobile clients
+// commonly send low|medium|high. Normalize at the edge so the DB stays
+// consistent.
+const SEVERITY_ALIASES = {
+  low: 'info',
+  medium: 'warning',
+  high: 'critical',
+};
+const alertSchema = z
+  .object({
+    type: z.string().min(1).max(50),
+    severity: z
+      .enum(['info', 'warning', 'critical', 'low', 'medium', 'high'])
+      .optional(),
+    busId: z.string().uuid().optional(),
+    tripId: z.string().uuid().optional(),
+    message: z.string().max(2000).optional(),
+  })
+  .transform((v) => ({
+    ...v,
+    severity: v.severity ? SEVERITY_ALIASES[v.severity] || v.severity : undefined,
+  }));
 
 const idParam = z.object({ id: z.string().uuid() });
 

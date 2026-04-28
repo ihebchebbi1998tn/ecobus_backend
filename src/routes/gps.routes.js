@@ -93,45 +93,45 @@ const fanOutArrivals = async ({ tripId, routeId, busId, arrivals }) => {
  *       403: { description: Cross-tenant or not the assigned driver }
  *       429: { description: Rate-limited }
  */
-router.post(
-  '/',
-  validate(gpsSchema),
-  gpsRateLimiter,
-  asyncHandler(async (req, res) => {
-    const { live, arrivals, tripId, routeId } = await svc.ingest(req.user, req.body);
-    const busId = req.body.busId;
+// Single ingest handler used by both POST / and POST /location (spec alias).
+// Responds 202 first, then performs websocket fan-out + parent notifications
+// off the request critical path so GPS writes stay sub-50ms under load.
+const ingestHandler = asyncHandler(async (req, res) => {
+  const { live, arrivals, tripId, routeId } = await svc.ingest(req.user, req.body);
+  const busId = req.body.busId;
 
-    // Respond first — fan-out runs asynchronously and never blocks GPS writes.
-    res.status(202).json({ ...live, arrivals });
+  res.status(202).json({ ...live, arrivals });
 
-    const io = getIO();
-    if (io) {
-      const ns = io.of('/ws');
-      ns.to(`bus:${busId}`).emit('bus.location.updated', live);
-      ns.to(`org:${req.user.organizationId}`).emit('bus.location.updated', live);
-      if (tripId) ns.to(`trip:${tripId}`).emit('bus.location.updated', live);
+  const io = getIO();
+  if (io) {
+    const ns = io.of('/ws');
+    ns.to(`bus:${busId}`).emit('bus.location.updated', live);
+    ns.to(`org:${req.user.organizationId}`).emit('bus.location.updated', live);
+    if (tripId) ns.to(`trip:${tripId}`).emit('bus.location.updated', live);
 
-      arrivals.forEach((stop) => {
-        const event = { tripId, routeId, busId, stop };
-        if (tripId) ns.to(`trip:${tripId}`).emit('stop.arrived', event);
-        ns.to(`bus:${busId}`).emit('stop.arrived', event);
-        ns.to(`org:${req.user.organizationId}`).emit('stop.arrived', event);
-      });
-    }
+    arrivals.forEach((stop) => {
+      const event = { tripId, routeId, busId, stop };
+      if (tripId) ns.to(`trip:${tripId}`).emit('stop.arrived', event);
+      ns.to(`bus:${busId}`).emit('stop.arrived', event);
+      ns.to(`org:${req.user.organizationId}`).emit('stop.arrived', event);
+    });
+  }
 
-    if (arrivals.length > 0) {
-      fanOutArrivals({ tripId, routeId, busId, arrivals })
-        .then((events) => {
-          const ns = io?.of('/ws');
-          if (!ns) return;
-          events.forEach((e) =>
-            ns.to(`user:${e.parentId}`).emit('stop.arrived', e.payload),
-          );
-        })
-        .catch((err) => logger.error('arrival fan-out failed', { err: err.message, tripId }));
-    }
-  }),
-);
+  if (arrivals.length > 0) {
+    fanOutArrivals({ tripId, routeId, busId, arrivals })
+      .then((events) => {
+        const ns = io?.of('/ws');
+        if (!ns) return;
+        events.forEach((e) =>
+          ns.to(`user:${e.parentId}`).emit('stop.arrived', e.payload),
+        );
+      })
+      .catch((err) => logger.error('arrival fan-out failed', { err: err.message, tripId }));
+  }
+});
+
+router.post('/', validate(gpsSchema), gpsRateLimiter, ingestHandler);
+router.post('/location', validate(gpsSchema), gpsRateLimiter, ingestHandler);
 
 router.get('/live/:busId', asyncHandler(async (req, res) =>
   res.json(await svc.live(req.user.organizationId, req.params.busId))));
